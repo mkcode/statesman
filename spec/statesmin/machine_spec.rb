@@ -526,6 +526,50 @@ describe Statesmin::Machine do
 
     let(:instance) { machine.new(my_model) }
 
+    context "when it is called with a block" do
+      let(:block_spy)   { double(called: 'called') }
+      let(:block) { proc { block_spy.called } }
+
+      context "and the state cannot be transitioned to" do
+        it "does not call the block" do
+          expect(block_spy).to_not receive(:called)
+          expect { instance.transition_to!(:z, &block) }.to raise_error
+        end
+      end
+
+      context "and the state can be transitioned to" do
+        it "calls the block" do
+          expect(block_spy).to receive(:called)
+          instance.transition_to(:y, &block)
+        end
+
+        context 'and the block errors' do
+          let(:error_block) { proc { raise } }
+
+          it "raises the error" do
+            expect { instance.transition_to(:y, &error_block) }.
+              to raise_error(RuntimeError)
+          end
+
+          it "does not change the current_state" do
+            expect { instance.transition_to(:y, &error_block) }.to raise_error
+            expect(instance.current_state).to eq('x')
+          end
+        end
+
+        context 'and the block does not error' do
+          it "returns the value of the block" do
+            expect(instance.transition_to(:y, &block)).to eq('called')
+          end
+
+          it "updates the current_state" do
+            instance.transition_to(:y, &block)
+            expect(instance.current_state).to eq('y')
+          end
+        end
+      end
+    end
+
     context "when the state cannot be transitioned to" do
       it "raises an error" do
         expect { instance.transition_to!(:z) }.
@@ -539,7 +583,7 @@ describe Statesmin::Machine do
         expect(instance.current_state).to eq("y")
       end
 
-      specify { expect(instance.transition_to!(:y)).to be_truthy }
+      specify { expect(instance.transition_to!(:y)).to eq(true) }
 
       context "with a guard" do
         let(:result) { true }
@@ -578,7 +622,7 @@ describe Statesmin::Machine do
   describe "#transition_to" do
     let(:instance) { machine.new(my_model) }
     let(:metadata) { { some: :metadata } }
-    subject { instance.transition_to(:some_state, metadata) }
+    subject { instance.transition_to(:some_state, metadata, &proc {}) }
 
     context "when it is succesful" do
       before do

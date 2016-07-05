@@ -2,7 +2,14 @@ require "spec_helper"
 
 describe Statesmin::TransitionHelper do
   let(:transition_class)  { Class.new { include Statesmin::TransitionHelper } }
-  let(:state_machine) { double }
+  let(:state_machine) do
+    Class.new do
+      include Statesmin::Machine
+      state :x, initial: true
+      state :y
+      transition from: :x, to: :y
+    end.new(Object.new)
+  end
   let(:instance) do
     transition_class.new.tap do |instance|
       allow(instance).to receive(:state_machine).and_return(state_machine)
@@ -13,10 +20,10 @@ describe Statesmin::TransitionHelper do
     context 'when no state_machine method is defined' do
       let(:unimplemented_instance) { transition_class.new }
 
-      Statesmin::TransitionHelper::DELEGATED_METHODS.each do |method_name|
-        describe "##{method_name}" do
+      Statesmin::TransitionHelper::DELEGATED_METHODS.each do |method|
+        describe "##{method}" do
           it 'raises a NotImplementedError' do
-            expect { unimplemented_instance.send(method_name) }.
+            expect { unimplemented_instance.send(method) }.
               to raise_error(Statesmin::NotImplementedError)
           end
         end
@@ -24,11 +31,12 @@ describe Statesmin::TransitionHelper do
     end
 
     context 'when a state_machine method is defined' do
-      Statesmin::TransitionHelper::DELEGATED_METHODS.each do |method_name|
-        describe "##{method_name}" do
+      Statesmin::TransitionHelper::DELEGATED_METHODS.each do |method|
+        describe "##{method}" do
           it 'calls that method on the state_machine' do
-            expect(state_machine).to receive(method_name)
-            instance.send(method_name)
+            needs_arg = state_machine.method(method).arity == 0
+            expect(state_machine).to receive(method)
+            needs_arg ? instance.send(method) : instance.send(method, :y)
           end
         end
       end
@@ -38,38 +46,30 @@ describe Statesmin::TransitionHelper do
   shared_examples 'a transition method' do |method|
     context 'when no transition method is defined' do
       it 'raises a NotImplementedError' do
-        expect { instance.send(method, :next) }.
+        expect { instance.send(method, :y) }.
           to raise_error(Statesmin::NotImplementedError)
       end
     end
 
     context 'when a transition method is defined' do
-      let(:transition) { double }
       before do
         instance.define_singleton_method :transition, -> (_state, _) { nil }
-        allow(instance).to receive(:transition).and_return(transition)
       end
 
       context 'when the next_state argument is a valid transition' do
-        before do
-          allow(state_machine).to receive(:can_transition_to?).and_return(true)
-          allow(state_machine).to receive(:current_state).and_return('new')
-        end
-
         it 'calls the transition method' do
           expect(instance).to receive(:transition)
-          instance.send(method, :next)
+          instance.send(method, :y)
         end
 
-        it 'resets the @state_machine instance variable' do
-          instance.instance_variable_set(:@state_machine, true)
-          instance.send(method, :next)
-          expect(instance.instance_variable_get(:@state_machine)).to be_nil
+        it 'updates the current_state of the state_machine' do
+          instance.send(method, :y)
+          expect(state_machine.current_state).to eq('y')
         end
 
         it 'returns the value of the transition method' do
           allow(instance).to receive(:transition).and_return(42)
-          expect(instance.send(method, :next)).to eq(42)
+          expect(instance.send(method, :y)).to eq(42)
         end
       end
     end
@@ -79,38 +79,36 @@ describe Statesmin::TransitionHelper do
     it_behaves_like 'a transition method', :transition_to!
 
     context 'when a valid transition method is defined' do
-      let(:transition) { double }
       before do
         instance.define_singleton_method :transition, -> (_state, _) { nil }
       end
 
       context 'and the next_state argument is not a valid transition' do
-        before do
-          allow(state_machine).to receive(:can_transition_to?).and_return(false)
-          allow(state_machine).to receive(:current_state).and_return('new')
+        it 'raises a TransitionFailedError' do
+          expect { instance.transition_to!(:z) }.
+            to raise_error(Statesmin::TransitionFailedError)
         end
 
-        it 'raises a TransitionFailedError' do
-          expect { instance.transition_to!(:next) }.
-            to raise_error(Statesmin::TransitionFailedError)
+        it 'does not call the transition method' do
+          expect(instance).to_not receive(:transition)
+          expect { instance.transition_to!(:z) }.to raise_error
+        end
+
+        it 'does not update the current_state of the state_machine' do
+          expect { instance.transition_to!(:z) }.to raise_error
+          expect(state_machine.current_state).to eq('x')
         end
       end
     end
 
     context 'when a error raising transition method is defined' do
-      let(:transition) { double }
       before do
         instance.define_singleton_method :transition, -> (_state, _) { raise }
       end
 
       context 'and the next_state argument is a valid' do
-        before do
-          allow(state_machine).to receive(:can_transition_to?).and_return(true)
-          allow(state_machine).to receive(:current_state).and_return('new')
-        end
-
         it 'raises a RuntimeError' do
-          expect { instance.transition_to!(:next) }.to raise_error(RuntimeError)
+          expect { instance.transition_to!(:y) }.to raise_error(RuntimeError)
         end
       end
     end
@@ -120,25 +118,28 @@ describe Statesmin::TransitionHelper do
     it_behaves_like 'a transition method', :transition_to
 
     context 'when a valid transition method is defined' do
-      let(:transition) { double }
       before do
         instance.define_singleton_method :transition, -> (_state, _) { nil }
       end
 
       context 'and the next_state argument is not a valid transition' do
-        before do
-          allow(state_machine).to receive(:can_transition_to?).and_return(false)
-          allow(state_machine).to receive(:current_state).and_return('new')
+        it 'returns false' do
+          expect(instance.transition_to(:z)).to eq(false)
         end
 
-        it 'returns false' do
-          expect(instance.transition_to(:next)).to eq(false)
+        it 'does not call the transition method' do
+          expect(instance).to_not receive(:transition)
+          instance.transition_to(:z)
+        end
+
+        it 'does not update the current_state of the state_machine' do
+          instance.transition_to(:z)
+          expect(state_machine.current_state).to eq('x')
         end
       end
     end
 
     context 'when a transition method raises a RuntimeError' do
-      let(:transition) { double }
       before do
         instance.define_singleton_method :transition do |_state, _|
           raise RuntimeError
@@ -146,19 +147,13 @@ describe Statesmin::TransitionHelper do
       end
 
       context 'and the next_state argument is a valid' do
-        before do
-          allow(state_machine).to receive(:can_transition_to?).and_return(true)
-          allow(state_machine).to receive(:current_state).and_return('new')
-        end
-
         it 'raises a RuntimeError' do
-          expect { instance.transition_to(:next) }.to raise_error(RuntimeError)
+          expect { instance.transition_to(:y) }.to raise_error(RuntimeError)
         end
       end
     end
 
     context 'when a transition method raises a TransitionFailedError' do
-      let(:transition) { double }
       before do
         instance.define_singleton_method :transition do |_state, _|
           raise Statesmin::TransitionFailedError
@@ -166,13 +161,8 @@ describe Statesmin::TransitionHelper do
       end
 
       context 'and the next_state argument is a valid' do
-        before do
-          allow(state_machine).to receive(:can_transition_to?).and_return(true)
-          allow(state_machine).to receive(:current_state).and_return('new')
-        end
-
         it 'returns false' do
-          expect(instance.transition_to(:next)).to eq(false)
+          expect(instance.transition_to(:y)).to eq(false)
         end
       end
     end

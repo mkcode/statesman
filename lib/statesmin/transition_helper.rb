@@ -17,10 +17,9 @@ module Statesmin
 
     def transition_to!(next_state, data = {})
       raise_transition_not_defined_error unless respond_to?(:transition)
-      guard_transitions_to_invalid_states!(next_state)
-      return_value = transition(next_state, data)
-      @state_machine = nil
-      return_value
+      state_machine.transition_to!(next_state, data) do
+        transition(next_state, data)
+      end
     end
 
     def transition_to(next_state, data = {})
@@ -37,13 +36,6 @@ module Statesmin
 
     def raise_transition_not_defined_error
       raise Statesmin::NotImplementedError.new('transition', self.class.name)
-    end
-
-    def guard_transitions_to_invalid_states!(next_state)
-      unless can_transition_to? next_state
-        raise Statesmin::TransitionFailedError,
-              "Cannot transition from '#{current_state}' to '#{next_state}'"
-      end
     end
   end
 end

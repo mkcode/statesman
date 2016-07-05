@@ -200,7 +200,7 @@ module Statesmin
       false
     end
 
-    def transition_to!(new_state, metadata = {})
+    def transition_to!(new_state, metadata = {}, &block)
       initial_state = current_state
       new_state = new_state.to_s
 
@@ -208,8 +208,10 @@ module Statesmin
                           to: new_state,
                           metadata: metadata)
 
+      block_value = block.call(new_state, metadata) if block_given?
       @current_state = new_state
-      true
+
+      block_value || true
     end
 
     def execute(phase, initial_state, new_state, transition)
@@ -217,8 +219,8 @@ module Statesmin
       callbacks.each { |cb| cb.call(@object, transition) }
     end
 
-    def transition_to(new_state, metadata = {})
-      self.transition_to!(new_state, metadata)
+    def transition_to(new_state, metadata = {}, &block)
+      self.transition_to!(new_state, metadata, &block)
     rescue TransitionFailedError, GuardFailedError
       false
     end

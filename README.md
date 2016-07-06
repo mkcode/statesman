@@ -7,7 +7,7 @@ uses a machete to rip out all of the database related code leaving you with a
 simple, robust, and well tested DSL for defining state machines in your
 application.
 
-### When to use statesmin rather than statesman:
+### When to use statesmin over statesman:
 
  * You wish to manage an object's current state yourself, including not
    persisting it at all.
@@ -115,7 +115,7 @@ state_machine.transition_to!(:checking_out) # => true
 state_machine.current_state # => "checking_out"
 ```
 
-### Statesmin::Machine #transition_to! && #transition_to
+### Statesmin::Machine #transition_to! and #transition_to
 
 The `#transition_to` and `#transition_to!` methods now both take a block
 argument as well. If a block is given, any error raised in the block body will

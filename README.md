@@ -1,4 +1,4 @@
-## Statesmin
+# Statesmin
 
 [![Build Status](https://travis-ci.org/mkcode/statesmin.svg?branch=master)](https://travis-ci.org/mkcode/statesmin)
 
@@ -7,7 +7,7 @@ uses a machete to rip out all of the database related code leaving you with a
 simple, robust, and well tested DSL for defining state machines in your
 application.
 
-When to use statesmin rather than statesman:
+### When to use statesmin rather than statesman:
 
  * You wish to manage an object's current state yourself, including not
    persisting it at all.
@@ -31,9 +31,9 @@ and running without any special requirements or concerns.
 
 ### Working with Statesmin::Machine
 
-Defining a state machine uses the same DSL as statesman with 0 differences. See
-[tldr-usage](https://github.com/gocardless/statesman#tldr-usage) for a more
-complete example
+Defining a state machine uses the same DSL as statesman. See
+[tldr-usage](https://github.com/mkcode/statesmin#tldr-usage) for a more complete
+example.
 
 ```ruby
 class OrderStateMachine
@@ -63,10 +63,10 @@ end
 
 ### Instantiating a Statesmin::Machine
 
-The `Machine` instance initializer now takes a `state` option which sets the
-initial state of the state machine. If the `state` option is omitted, the
-`initial: true` state from the Machine definition is used. Passing an invalid
-state will yield a `Statesmin::InvaliedStateError`.
+The `Statesman::Machine` instance initializer now takes a `state` option which
+sets the initial state of the state machine. If the `state` option is omitted,
+the `initial: true` state from the Machine definition is used. Passing an
+invalid state will yield a `Statesmin::InvalidStateError`.
 
 ```ruby
 # A valid state is set as the current_state
@@ -96,8 +96,8 @@ state_machine.can_transition_to?(:cancelled) # => true/false
 ```
 
 The `#transition_to` and `#transition_to!` methods are updated. They now simply
-update the state machines internal current state to the new state, if it is
-valid. `transition_to!` raises a `Statesmin::TransitionFailedError` if an
+update the state machines internal current state to the new state when it is
+valid. `transition_to!` raises a `Statesmin::TransitionFailedError` when an
 invalid state is given. `transition_to` returns false.
 
 ```ruby
@@ -168,7 +168,7 @@ cases defining a Transition class is recommended.
 ### Defining a Transition class
 
 You are free to set up a state machine and corresponding transition behavior
-however you like. A `TransitionHelper` module is included to help provide
+however you like. The `TransitionHelper` module is included to help provide
 structure and reduce boilerplate code.
 
 Create a new class which includes the `Statesmin::TransitionHelper` module. This
@@ -237,26 +237,26 @@ class OrderTransitionService
 end
 ```
 
-Now, an instance of OrderTransitionService has the same methods as
+An instance of OrderTransitionService now has the same methods as
 `Statesmin::Machine`.
 
 ```ruby
-state_machine = OrderTransitionService.new(Order.first)
+order_transition = OrderTransitionService.new(Order.first)
 
 # reader methods are delegated to `state_machine`
-state_machine.current_state # => "pending"
-state_machine.in_state?(:failed, :cancelled) # => true/false
-state_machine.allowed_transitions # => ["checking_out", "cancelled"]
-state_machine.can_transition_to?(:cancelled) # => true/false
+order_transition.current_state # => "pending"
+order_transition.in_state?(:failed, :cancelled) # => true/false
+order_transition.allowed_transitions # => ["checking_out", "cancelled"]
+order_transition.can_transition_to?(:cancelled) # => true/false
 
 # `transition_to` and `transition_to!` also execute the transition method
-state_machine.transition_to(:invalid_state)
+order_transition.transition_to(:invalid_state)
 # => false
-state_machine.current_state # => "pending"
+order_transition.current_state # => "pending"
 
-state_machine.transition_to!(:checking_out)
+order_transition.transition_to!(:checking_out)
 # => <#OrderLogEntry>
-state_machine.current_state # => "checking_out"
+order_transition.current_state # => "checking_out"
 ```
 
 ### Flexibility

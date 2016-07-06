@@ -7,7 +7,272 @@ uses a machete to rip out all of the database related code leaving you with a
 simple, robust, and well tested DSL for defining state machines in your
 application.
 
-The following is an adapted version of the original Statesmin README.
+When to use statesmin rather than statesman:
+
+ * You wish to manage an object's current state yourself, including not
+   persisting it at all.
+ * You have custom requirements for your transition log entries.
+ * You need multiple (and very different) transition processes.
+ * You enjoy and habitually write service objects with small scopes.
+ * You will be frequently updating the state of an object and you can expect the
+   transitions log to contain a lot of entries.
+
+If any of the above apply to your application, then consider using statesmin. In
+addition to defining your state machines, statesmin also requires you to:
+
+ * Persist the current state of the object(s) yourself.
+ * Instantiate a state machine with the object's current state yourself.
+ * Maintain an transition / audit log yourself (if required)
+ * Define a custom transition process yourself.
+
+All in all, statesmin takes considerably more work to get setup and running than
+statesman, so statesman is recommended if you need to get a state machine setup
+and running without any special requirements or concerns.
+
+### Working with Statesmin::Machine
+
+Defining a state machine uses the same DSL as statesman with 0 differences. See
+[tldr-usage](https://github.com/gocardless/statesman#tldr-usage) for a more
+complete example
+
+```ruby
+class OrderStateMachine
+  include Statesmin::Machine
+
+  state :pending, initial: true
+  state :checking_out
+  state :purchased
+  state :cancelled
+
+  transition from: :pending,      to: [:checking_out, :cancelled]
+  transition from: :checking_out, to: [:purchased, :cancelled]
+
+  guard_transition(to: :checking_out) do |order|
+    order.products_in_stock?
+  end
+
+  before_transition(from: :checking_out, to: :cancelled) do |order, transition|
+    order.reallocate_stock
+  end
+
+  after_transition(to: :purchased) do |order, transition|
+    MailerService.order_confirmation(order).deliver
+  end
+end
+```
+
+### Instantiating a Statesmin::Machine
+
+The `Machine` instance initializer now takes a `state` option which sets the
+initial state of the state machine. If the `state` option is omitted, the
+`initial: true` state from the Machine definition is used. Passing an invalid
+state will yield a `Statesmin::InvaliedStateError`.
+
+```ruby
+# A valid state is set as the current_state
+state_machine = OrderStateMachine.new(Order.first, state: :cancelled)
+state_machine.current_state # => "cancelled"
+
+# Invalid states raise an InvaliedStateError
+state_machine = OrderStateMachine.new(Order.first, state: :whoops)
+# => raise Statesmin::InvalidStateError
+
+# No state option sets the state to the initial state
+state_machine = OrderStateMachine.new(Order.first)
+state_machine.current_state # => "pending"
+```
+
+### Statesmin::Machine instance methods
+
+All instance methods from statesman are available on statesmin with the
+exception of `#history` and `#last_transition`. 
+
+```ruby
+state_machine = OrderStateMachine.new(Order.first)
+state_machine.current_state # => "pending"
+state_machine.in_state?(:failed, :cancelled) # => true/false
+state_machine.allowed_transitions # => ["checking_out", "cancelled"]
+state_machine.can_transition_to?(:cancelled) # => true/false
+```
+
+The `#transition_to` and `#transition_to!` methods are updated. They now simply
+update the state machines internal current state to the new state, if it is
+valid. `transition_to!` raises a `Statesmin::TransitionFailedError` if an
+invalid state is given. `transition_to` returns false.
+
+```ruby
+state_machine = OrderStateMachine.new(Order.first, state: :pending)
+state_machine.current_state # => "pending"
+
+state_machine.transition_to!(:invalid_state)
+# => raise Statesmin::TransitionFailedError
+
+state_machine.transition_to(:invalid_state)
+# => false
+state_machine.current_state # => "pending"
+
+state_machine.transition_to!(:checking_out) # => true
+state_machine.current_state # => "checking_out"
+```
+
+### Statesmin::Machine #transition_to! && #transition_to
+
+The `#transition_to` and `#transition_to!` methods now both take a block
+argument as well. If a block is given, any error raised in the block body will
+halt the transition and not update the current state. `transition_to!` will
+always raise the error from the block body, while `transition_to` will return
+false if a `Statesmin::TransitionFailedError` is raised. `transition_to` will
+still raise all other errors.
+
+`#transition_to` and `#transition_to!` will both return the value returned from
+the block when they are called without errors. The state machine's current state
+is updated to the new state immediately after the block has executed.
+
+Finally, `#transition_to` and `#transition_to!` will only execute the given
+block if the state argument is a valid transition. Invalid state arguments will
+behave the same way as they do without blocks, either returning false or raising
+a `Statesmin::TransitionFailedError` respectively.
+
+```ruby
+state_machine = OrderStateMachine.new(Order.first, state: :pending)
+state_machine.current_state # => "pending"
+
+state_machine.transition_to! :invalid_state do
+  puts 'never evaluated due to the :invalid_state argument'
+end
+# => raise Statesmin::TransitionFailedError
+
+state_machine.transition_to :checking_out do
+  raise Statesmin::TransitionFailedError
+end
+# => false
+
+state_machine.transition_to :checking_out do
+  raise Order::InvalidAddress
+end
+# => raise Order::InvalidAddress
+state_machine.current_state # => "pending"
+
+state_machine.transition_to :checking_out do
+  OrderLogEntry.create!(order_data)
+end
+# => <#OrderLogEntry>
+state_machine.current_state # => "checking_out
+```
+
+The transition block is the basis of how Statesmin allows for custom transition
+behavior and distinguishes itself from Statesman. For small application or
+transition requirements, the transition block may be sufficient but in most
+cases defining a Transition class is recommended.
+
+### Defining a Transition class
+
+You are free to set up a state machine and corresponding transition behavior
+however you like. A `TransitionHelper` module is included to help provide
+structure and reduce boilerplate code.
+
+Create a new class which includes the `Statesmin::TransitionHelper` module. This
+module does the following for you:
+
+ * Sets up a good outline for a Transaction (service) class
+ * Delegates reader methods to an underlying state machine instance
+ * Intercepts transition methods so they may be extend with specific behavior
+ 
+`Statesmin::TransitionHelper` requires you to define two methods in your
+transition class:
+
+ * `state_machine` - This method returns the instance of the
+   `Statesmin::Machine` class to use in the class. The reader methods delegate
+   to this state machine instance. You will most likely also need it in other
+   methods.
+
+ * `transition` - This method defines the custom portion of the transition logic
+   for this application and object. Usually, you will trigger state persistence,
+   Transition logging, and callback execution from this method. Multiple
+   database updates are always recommended to be wrapped in a transaction.
+
+#### Example
+
+The following example does the following during a transition:
+
+ * Builds and saves an OrderLog record to the OrderLog table
+ * Persists the current state of the order in the Order table.
+ * Executes any before, after, and after_commit callbacks for the specific
+   transition
+ * Commits all of these database updates atomically (everything or nothing)
+ * Returns the newly created order log record.
+
+```ruby
+class OrderTransitionService
+  include Statesmin::TransitionHelper
+
+  def initialize(order)
+    @order = order
+  end
+
+  private
+
+  def transition(next_state, data = {})
+    order_log = build_order_log_entry(next_state, data)
+
+    ::ActiveRecord::Base.transaction do
+      state_machine.execute(:before, current_state, next_state, data)
+      @order.update!(state: next_state)
+      order_log.save!
+      state_machine.execute(:after, current_state, next_state, data)
+    end
+    state_machine.execute(:after_commit, current_state, next_state, data)
+
+    order_log
+  end
+  
+  def state_machine
+    @state_machine ||= OrderStateMachine.new(@order, state: @order.state)
+  end
+  
+  def build_order_log_entry(next_state, data)
+    log_attributes = { from: current_state, to: next_state, data: data }
+    @order.order_logs.build(log_attributes)
+  end
+end
+```
+
+Now, an instance of OrderTransitionService has the same methods as
+`Statesmin::Machine`.
+
+```ruby
+state_machine = OrderTransitionService.new(Order.first)
+
+# reader methods are delegated to `state_machine`
+state_machine.current_state # => "pending"
+state_machine.in_state?(:failed, :cancelled) # => true/false
+state_machine.allowed_transitions # => ["checking_out", "cancelled"]
+state_machine.can_transition_to?(:cancelled) # => true/false
+
+# `transition_to` and `transition_to!` also execute the transition method
+state_machine.transition_to(:invalid_state)
+# => false
+state_machine.current_state # => "pending"
+
+state_machine.transition_to!(:checking_out)
+# => <#OrderLogEntry>
+state_machine.current_state # => "checking_out"
+```
+
+### Flexibility
+
+The above example defines behavior similar to Statesman. Some examples of what
+else can be done with an open Transition class.
+
+ * Have multiple state machines for the same object by adding a condition in the
+   `states_machine` method.
+ * Have multiple types a transitions for the same object by defining multiple
+   Transition classes with the same instantiating object.
+ * Have different Transition logs/tables for different objects.
+ * Turn parts of a transition on and off based off of an initializer argument
+
+
+The following is an adapted version of the original Statesman README.
 
 ---
 

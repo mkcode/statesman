@@ -16,7 +16,7 @@ module Statesmin
     end
 
     def transition_to!(next_state, data = {})
-      raise_transition_not_defined_error unless respond_to?(:transition, false)
+      raise_transition_not_defined_error unless respond_to?(:transition, true)
       state_machine.transition_to!(next_state, data) do
         transition(next_state, data)
       end
